@@ -8,7 +8,32 @@ import { resolveEdits } from '@/agent/resolver';
 import { selectAutoAccept } from '@/agent/auto-accept';
 import { extractUsage, sumUsage, type Usage } from '@/lib/usage';
 import { extractPdfGeometry, findAnchorBbox } from '@/agent/pdf-anchors';
+import { normalizeFile, renderPdfPages } from '@/lib/normalize';
 import fs from 'fs';
+import path from 'path';
+
+// Добор недостающих артефактов (parsed_text, page_render) из исходного файла.
+// Нужен для заказов, загруженных до появления соответствующих фич.
+async function backfillArtifacts(orderId: number, type: string): Promise<void> {
+  const source = q.getArtifact(orderId, 'source');
+  if (!source?.path || !fs.existsSync(source.path)) return;
+
+  if (!q.getArtifact(orderId, 'parsed_text')) {
+    const buffer = fs.readFileSync(source.path);
+    const norm = await normalizeFile(path.basename(source.path), buffer);
+    if (norm.text) q.saveArtifact(orderId, 'parsed_text', { content: norm.text });
+  }
+
+  if (type !== 'text' && q.listArtifacts(orderId, 'page_render').length === 0) {
+    const buffer = fs.readFileSync(source.path);
+    const renders = type === 'pdf' ? await renderPdfPages(buffer) : [];
+    renders.forEach((render, i) => {
+      const renderPath = path.join(process.cwd(), 'data', 'uploads', `${orderId}-page${i + 1}.png`);
+      fs.writeFileSync(renderPath, render);
+      q.saveArtifact(orderId, 'page_render', { path: renderPath });
+    });
+  }
+}
 
 export async function runCheck(orderId: number): Promise<void> {
   const order = q.getOrder(orderId);
@@ -19,6 +44,11 @@ export async function runCheck(orderId: number): Promise<void> {
   q.clearUndecidedEdits(orderId);
   try {
     const profile = q.getProfile(order.clientProfileId ?? null);
+
+    // backfill: заказы, загруженные до появления извлечения текста / рендера страниц,
+    // не имеют этих артефактов — добираем их из исходника при перепроверке (лечит старые заказы).
+    await backfillArtifacts(orderId, order.type);
+
     const parsed = q.getArtifact(orderId, 'parsed_text');
     const text = parsed?.content ?? '';
     const usages: Usage[] = []; // фактический расход всех pass-ов

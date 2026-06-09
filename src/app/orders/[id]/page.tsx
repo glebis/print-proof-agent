@@ -284,9 +284,20 @@ export default function ReviewPage({ params }: { params: Promise<{ id: string }>
                   </button>
                 </Tip>
               )}
+              {/* PDF без рендеров (нельзя показать <img>): только ссылка на оригинал */}
+              {showSource && order.type === 'pdf' && data.renderPages === 0 && (
+                <p className="footnote" style={{ marginTop: '0.6rem' }}>
+                  Предпросмотр недоступен — <a className="act" href={`/api/orders/${order.id}/source`} target="_blank">открыть PDF ↗</a>. Перепроверьте заказ, чтобы отрендерить страницы.
+                </p>
+              )}
               {showSource &&
-                // многостраничный PDF: рендер каждой страницы со своими bbox; картинка — одна «страница»
-                (data.renderPages > 0 ? Array.from({ length: data.renderPages }, (_, k) => k + 1) : [0]).map((pageNo) => (
+                // макет: для PDF — рендеры страниц со своими bbox; картинка — одна «страница» (pageNo=0)
+                (data.renderPages > 0
+                  ? Array.from({ length: data.renderPages }, (_, k) => k + 1)
+                  : order.type === 'pdf'
+                    ? []
+                    : [0]
+                ).map((pageNo) => (
                 <div className="source-wrap" key={pageNo}>
                   {data.renderPages > 1 && <div className="label" style={{ margin: '0.5rem 0 0.2rem' }}>стр. {pageNo} из {data.renderPages}</div>}
                   {/* eslint-disable-next-line @next/next/no-img-element */}
